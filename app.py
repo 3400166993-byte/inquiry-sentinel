@@ -99,6 +99,22 @@ FIELD_LABELS = {
     "notes": "备注",
 }
 
+COMPARISON_FIELDS = [
+    ("revenue", "营业收入"),
+    ("revenue_yoy", "营业收入同比%"),
+    ("net_profit", "净利润"),
+    ("net_profit_yoy", "净利润同比%"),
+    ("cfo", "经营现金流净额"),
+    ("cfo_yoy", "经营现金流同比%"),
+    ("receivables", "应收账款"),
+    ("receivables_yoy", "应收账款同比%"),
+    ("inventory", "存货"),
+    ("inventory_yoy", "存货同比%"),
+    ("gross_margin", "毛利率%"),
+    ("gross_margin_change", "毛利率变动百分点"),
+    ("debt_ratio", "资产负债率%"),
+]
+
 
 def _clean_value(value: Any) -> Any:
     if value is None:
@@ -156,12 +172,43 @@ def parse_uploaded_document(uploaded_file) -> tuple[DocumentContext, FinancialSn
     return document, snapshot, notes
 
 
+def comparison_frame(current: FinancialSnapshot, comparison: FinancialSnapshot) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    for field_name, label in COMPARISON_FIELDS:
+        current_value = getattr(current, field_name)
+        comparison_value = getattr(comparison, field_name)
+        change = None
+        if current_value is not None and comparison_value is not None:
+            change = current_value - comparison_value
+        rows.append(
+            {
+                "指标": label,
+                "当前报告期": current.report_period,
+                "当前值": current_value,
+                "对比报告期": comparison.report_period,
+                "对比值": comparison_value,
+                "变化": change,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def severity_class(severity: str) -> str:
     if severity == "高":
         return "risk-high"
     if severity == "中":
         return "risk-mid"
     return "risk-low"
+
+
+def render_evidence_chain(finding) -> None:
+    if not finding.evidence_references:
+        st.caption("当前没有结构化证据定位，请结合核心指标复核表查看。")
+        return
+    for reference in finding.evidence_references:
+        location = f"第 {reference.page} 页" if reference.page else "指标复核表"
+        st.markdown(f"**{location}｜{reference.source}｜可信度：{reference.confidence}**")
+        st.caption(reference.quote)
 
 
 def render_model_settings() -> LLMSettings:
@@ -244,6 +291,22 @@ with st.sidebar:
             st.error(f"案例库加载失败：{exc}")
             case_library = build_default_case_library()
     st.caption(f"当前案例库：{len(case_library)} 条")
+    st.divider()
+    st.subheader("多期对比（可选）")
+    comparison_file = st.file_uploader(
+        "上传另一期年报 PDF / TXT",
+        type=["pdf", "txt", "md"],
+        key="comparison_report",
+        help="上传同一公司的另一年度报告，生成关键指标变化表。",
+    )
+    comparison_document = None
+    comparison_snapshot = None
+    if comparison_file is not None:
+        try:
+            comparison_document, comparison_snapshot, _ = parse_uploaded_document(comparison_file)
+            st.success(f"已读取对比报告：{comparison_snapshot.report_period}，字段 {comparison_snapshot.filled_fields()} / 18。")
+        except Exception as exc:
+            st.error(f"对比报告解析失败：{exc}")
     if not PDF_SUPPORT_AVAILABLE:
         st.warning("当前环境未安装 PDF 抽取增强包，PDF 上传需安装 requirements-full.txt。")
     if not REPORTLAB_AVAILABLE:
@@ -307,6 +370,21 @@ with left:
         key="snapshot_editor",
     )
     snapshot = editor_frame_to_snapshot(edited_frame)
+
+    input_fingerprint = (
+        source_mode,
+        getattr(uploaded, "name", "") if source_mode == "上传上市公司年报 PDF" else scenario_name,
+        getattr(comparison_file, "name", ""),
+        tuple(snapshot.to_dict().items()),
+    )
+    if st.session_state.get("analysis_input_fingerprint") != input_fingerprint:
+        st.session_state.pop("analysis_result", None)
+        st.session_state["analysis_input_fingerprint"] = input_fingerprint
+
+    if comparison_snapshot is not None:
+        company_names = {snapshot.company_name.strip(), comparison_snapshot.company_name.strip()} - {"", "待分析公司", "示例公司"}
+        if len(company_names) > 1:
+            st.warning("当前报告与对比报告的公司名称不一致，请确认上传的是同一家公司后再解读趋势。")
 
     with st.expander("抽取痕迹", expanded=False):
         st.write(f"自动抽取字段数：{auto_snapshot.filled_fields()} / 18")
@@ -401,7 +479,13 @@ metrics[3].metric("平均风险分", f"{avg_score:.1f}")
 
 st.write(result.summary)
 
-tab_result, tab_cases, tab_eval, tab_export = st.tabs(["风险明细", "案例与证据", "量化评估", "导出"])
+tab_names = ["风险明细", "案例与证据", "量化评估"]
+if comparison_snapshot is not None:
+    tab_names.append("趋势对比")
+tab_names.append("导出")
+tabs = st.tabs(tab_names)
+tab_result, tab_cases, tab_eval = tabs[:3]
+tab_export = tabs[-1]
 
 with tab_result:
     if not result.findings:
@@ -416,6 +500,8 @@ with tab_result:
                 st.write("核心证据")
                 for item in finding.evidence:
                     st.write(f"- {item}")
+                st.write("证据链")
+                render_evidence_chain(finding)
                 st.write("可能问询问题")
                 for item in finding.llm_questions or finding.suggested_question:
                     st.write(f"- {item}")
@@ -443,6 +529,19 @@ with tab_eval:
             }
         )
         st.bar_chart(severity_frame, x="等级", y="数量")
+
+if comparison_snapshot is not None:
+    with tabs[3]:
+        st.subheader("多期关键指标对比")
+        st.caption(
+            f"当前报告：{snapshot.report_period}；对比报告：{comparison_snapshot.report_period}。"
+            "变化值按当前报告减去对比报告计算。"
+        )
+        trend_frame = comparison_frame(snapshot, comparison_snapshot)
+        st.dataframe(trend_frame, use_container_width=True, hide_index=True)
+        chart_frame = trend_frame.dropna(subset=["当前值", "对比值"]).set_index("指标")
+        if not chart_frame.empty:
+            st.bar_chart(chart_frame[["当前值", "对比值"]])
 
 with tab_export:
     render_downloads(result)

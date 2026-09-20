@@ -36,6 +36,8 @@ def findings_to_frame(findings: list[RiskFinding]) -> pd.DataFrame:
                 "风险等级": item.severity,
                 "风险分": round(item.score, 1),
                 "核心证据": "；".join(item.evidence),
+                "证据页码": "、".join(str(ref.page) for ref in item.evidence_references if ref.page) or "指标复核表",
+                "证据来源": "；".join(ref.quote for ref in item.evidence_references),
                 "可能问询问题": "；".join(question),
                 "建议审计程序": "；".join(procedure),
                 "相似案例数": len(item.supporting_cases),
@@ -86,6 +88,12 @@ def result_to_markdown(result: AnalysisResult) -> str:
             ]
         )
         lines.extend([f"- {item}" for item in finding.evidence])
+        if finding.evidence_references:
+            lines.append("")
+            lines.append("证据链：")
+            for reference in finding.evidence_references:
+                location = f"第{reference.page}页" if reference.page else "指标复核表"
+                lines.append(f"- {location}｜{reference.source}｜{reference.quote}")
         lines.append("")
         lines.append("可能问询问题：")
         lines.extend([f"- {item}" for item in questions])
@@ -207,6 +215,17 @@ def result_to_pdf_bytes(result: AnalysisResult) -> bytes:
     )
     story.append(table)
     story.append(Spacer(1, 10))
+    story.append(Paragraph("证据链", styles["CNHeading"]))
+    for finding in result.findings:
+        for reference in finding.evidence_references[:2]:
+            location = f"第{reference.page}页" if reference.page else "指标复核表"
+            story.append(
+                Paragraph(
+                    _wrap_text(f"{finding.title}｜{location}｜{reference.quote}", 92),
+                    styles["CNSmall"],
+                )
+            )
+    story.append(Spacer(1, 10))
     story.append(Paragraph("免责声明", styles["CNHeading"]))
     story.append(
         Paragraph(
@@ -230,6 +249,8 @@ def diagnostics_to_frame(diagnostics: dict[str, Any]) -> pd.DataFrame:
             {"指标": "抽取状态", "结果": diagnostics.get("extraction_status", "未知"), "说明": "字段少时不能直接解释为企业无风险"},
             {"指标": "风险规则触发数", "结果": diagnostics.get("finding_count", 0), "说明": "进入报告的风险点数量"},
             {"指标": "证据覆盖率", "结果": diagnostics.get("evidence_coverage", "0%"), "说明": "每个风险点是否有可复核证据"},
+            {"指标": "页码证据覆盖率", "结果": diagnostics.get("page_evidence_coverage", "0%"), "说明": "风险点是否能定位到年报页码"},
+            {"指标": "证据链条数", "结果": diagnostics.get("evidence_reference_count", 0), "说明": "原文摘录或指标复核证据的数量"},
             {"指标": "案例匹配覆盖率", "结果": diagnostics.get("case_coverage", "0%"), "说明": "每个风险点是否匹配到相似监管案例"},
             {"指标": "结构化输出", "结果": "通过", "说明": "支持 JSON、CSV、Markdown、PDF 下载"},
         ]

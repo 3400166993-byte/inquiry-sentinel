@@ -5,6 +5,7 @@ from dataclasses import asdict
 from typing import Any
 
 from .case_library import retrieve_similar_cases
+from .evidence import build_evidence_references
 from .llm_client import LLMSettings, chat_completion, parse_json_object
 from .models import AnalysisResult, DocumentContext, FinancialSnapshot, RiskFinding, SimilarCase
 from .rules import evaluate_snapshot, evaluate_text_signals
@@ -188,6 +189,7 @@ def run_analysis(
         cases = retrieve_similar_cases(query_terms, case_library, top_k=3)
         llm_payload = enrich_finding_with_llm(settings, snapshot, document, finding, cases)
         finding.supporting_cases = cases
+        finding.evidence_references = build_evidence_references(finding, snapshot, document)
         finding.llm_summary = str(llm_payload.get("summary") or finding.explanation)
         finding.llm_questions = [str(item) for item in llm_payload.get("questions", []) if str(item).strip()]
         finding.llm_procedures = [str(item) for item in llm_payload.get("procedures", []) if str(item).strip()]
@@ -203,6 +205,8 @@ def run_analysis(
         "filled_fields": snapshot.filled_fields(),
         "finding_count": len(enriched),
         "evidence_coverage": f"{(evidence_covered / max(1, len(enriched))) * 100:.0f}%",
+        "evidence_reference_count": sum(len(finding.evidence_references) for finding in enriched),
+        "page_evidence_coverage": f"{sum(any(ref.page for ref in finding.evidence_references) for finding in enriched) / max(1, len(enriched)) * 100:.0f}%",
         "case_coverage": f"{(case_covered / max(1, len(enriched))) * 100:.0f}%",
         "llm_mode": settings.provider if settings.enabled else "演示模式",
         "text_chars": len(document.extracted_text),

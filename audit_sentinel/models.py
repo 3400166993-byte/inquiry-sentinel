@@ -64,6 +64,24 @@ class DocumentContext:
     extracted_text: str = ""
     page_count: int = 0
     summary: str = ""
+    page_texts: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "source_name": self.source_name,
+            "page_count": self.page_count,
+            "summary": self.summary,
+            "text_chars": len(self.extracted_text),
+        }
+
+
+@dataclass
+class EvidenceReference:
+    label: str
+    quote: str
+    source: str
+    page: int | None = None
+    confidence: str = "中"
 
 
 @dataclass
@@ -98,6 +116,7 @@ class RiskFinding:
     explanation: str
     suggested_question: list[str]
     suggested_procedure: list[str]
+    evidence_references: list[EvidenceReference] = field(default_factory=list)
     supporting_cases: list[SimilarCase] = field(default_factory=list)
     llm_summary: str = ""
     llm_questions: list[str] = field(default_factory=list)
@@ -122,7 +141,7 @@ class AnalysisResult:
     def to_dict(self) -> dict[str, Any]:
         return {
             "snapshot": self.snapshot.to_dict(),
-            "document": asdict(self.document),
+            "document": self.document.to_dict(),
             "findings": [finding.to_dict() for finding in self.findings],
             "summary": self.summary,
             "diagnostics": self.diagnostics,

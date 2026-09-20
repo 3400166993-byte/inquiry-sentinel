@@ -57,6 +57,7 @@ def extract_text_from_pdf_bytes(data: bytes, source_name: str) -> DocumentContex
         extracted_text=text,
         page_count=document.page_count,
         summary=build_document_summary(text),
+        page_texts=pages,
     )
 
 
@@ -75,6 +76,7 @@ def extract_text_from_txt_bytes(data: bytes, source_name: str) -> DocumentContex
         extracted_text=text,
         page_count=1,
         summary=build_document_summary(text),
+        page_texts=[text],
     )
 
 
