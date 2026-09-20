@@ -25,6 +25,17 @@ except Exception:  # pragma: no cover - optional dependency
 from .models import AnalysisResult, RiskFinding
 
 
+def _evidence_references(finding: RiskFinding) -> list[Any]:
+    """Read evidence links from current and pre-upgrade session objects."""
+    return list(getattr(finding, "evidence_references", None) or [])
+
+
+def _reference_value(reference: Any, name: str, default: Any = "") -> Any:
+    if isinstance(reference, dict):
+        return reference.get(name, default)
+    return getattr(reference, name, default)
+
+
 def findings_to_frame(findings: list[RiskFinding]) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
     for item in findings:
@@ -36,8 +47,16 @@ def findings_to_frame(findings: list[RiskFinding]) -> pd.DataFrame:
                 "风险等级": item.severity,
                 "风险分": round(item.score, 1),
                 "核心证据": "；".join(item.evidence),
-                "证据页码": "、".join(str(ref.page) for ref in item.evidence_references if ref.page) or "指标复核表",
-                "证据来源": "；".join(ref.quote for ref in item.evidence_references),
+                "证据页码": "、".join(
+                    str(_reference_value(ref, "page"))
+                    for ref in _evidence_references(item)
+                    if _reference_value(ref, "page")
+                ) or "指标复核表",
+                "证据来源": "；".join(
+                    str(_reference_value(ref, "quote"))
+                    for ref in _evidence_references(item)
+                    if _reference_value(ref, "quote")
+                ),
                 "可能问询问题": "；".join(question),
                 "建议审计程序": "；".join(procedure),
                 "相似案例数": len(item.supporting_cases),
@@ -88,12 +107,16 @@ def result_to_markdown(result: AnalysisResult) -> str:
             ]
         )
         lines.extend([f"- {item}" for item in finding.evidence])
-        if finding.evidence_references:
+        references = _evidence_references(finding)
+        if references:
             lines.append("")
             lines.append("证据链：")
-            for reference in finding.evidence_references:
-                location = f"第{reference.page}页" if reference.page else "指标复核表"
-                lines.append(f"- {location}｜{reference.source}｜{reference.quote}")
+            for reference in references:
+                page = _reference_value(reference, "page")
+                source = _reference_value(reference, "source", "当前分析结果")
+                quote = _reference_value(reference, "quote")
+                location = f"第{page}页" if page else "指标复核表"
+                lines.append(f"- {location}｜{source}｜{quote}")
         lines.append("")
         lines.append("可能问询问题：")
         lines.extend([f"- {item}" for item in questions])
@@ -217,11 +240,13 @@ def result_to_pdf_bytes(result: AnalysisResult) -> bytes:
     story.append(Spacer(1, 10))
     story.append(Paragraph("证据链", styles["CNHeading"]))
     for finding in result.findings:
-        for reference in finding.evidence_references[:2]:
-            location = f"第{reference.page}页" if reference.page else "指标复核表"
+        for reference in _evidence_references(finding)[:2]:
+            page = _reference_value(reference, "page")
+            quote = _reference_value(reference, "quote")
+            location = f"第{page}页" if page else "指标复核表"
             story.append(
                 Paragraph(
-                    _wrap_text(f"{finding.title}｜{location}｜{reference.quote}", 92),
+                    _wrap_text(f"{finding.title}｜{location}｜{quote}", 92),
                     styles["CNSmall"],
                 )
             )

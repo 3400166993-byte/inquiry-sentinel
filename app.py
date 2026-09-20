@@ -202,13 +202,20 @@ def severity_class(severity: str) -> str:
 
 
 def render_evidence_chain(finding) -> None:
-    if not finding.evidence_references:
+    # Streamlit may keep a result created before the evidence-chain field existed.
+    references = getattr(finding, "evidence_references", None) or []
+    if not references:
         st.caption("当前没有结构化证据定位，请结合核心指标复核表查看。")
         return
-    for reference in finding.evidence_references:
-        location = f"第 {reference.page} 页" if reference.page else "指标复核表"
-        st.markdown(f"**{location}｜{reference.source}｜可信度：{reference.confidence}**")
-        st.caption(reference.quote)
+    for reference in references:
+        page = getattr(reference, "page", None)
+        source = getattr(reference, "source", "当前分析结果")
+        confidence = getattr(reference, "confidence", "待核验")
+        quote = getattr(reference, "quote", "")
+        location = f"第 {page} 页" if page else "指标复核表"
+        st.markdown(f"**{location}｜{source}｜可信度：{confidence}**")
+        if quote:
+            st.caption(quote)
 
 
 def render_model_settings() -> LLMSettings:
