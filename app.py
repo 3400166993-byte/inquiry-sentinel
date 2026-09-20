@@ -169,9 +169,14 @@ def render_model_settings() -> LLMSettings:
     settings = default_settings(provider)
 
     if provider != "演示模式":
-        settings.api_key = st.sidebar.text_input("API Key", value=settings.api_key, type="password")
-        settings.base_url = st.sidebar.text_input("Base URL", value=settings.base_url)
-        settings.model = st.sidebar.text_input("模型名称", value=settings.model)
+        visitor_key = st.sidebar.text_input("API Key", type="password", key=f"api_key_{provider}").strip()
+        if settings.api_key and not visitor_key:
+            # Server credentials must stay private and use the configured endpoint.
+            st.sidebar.caption(f"已使用服务器配置的模型：{settings.model}")
+        else:
+            settings.api_key = visitor_key
+            settings.base_url = st.sidebar.text_input("Base URL", value=settings.base_url, key=f"base_url_{provider}")
+            settings.model = st.sidebar.text_input("模型名称", value=settings.model, key=f"model_{provider}")
         settings.temperature = st.sidebar.slider("生成温度", min_value=0.0, max_value=1.0, value=0.2, step=0.05)
         settings.timeout = st.sidebar.slider("请求超时秒数", min_value=10, max_value=120, value=45, step=5)
     else:
